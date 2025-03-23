@@ -1,8 +1,9 @@
-# backend/models.py
+from sqlalchemy import Column, Integer, String, Boolean
+from .database import Base
 
-from pydantic import BaseModel
+class Todo(Base):
+    __tablename__ = "todos"
 
-# Модель задачі
-class Todo(BaseModel):
-    text: str
-    completed: bool = False
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(String, index=True)
+    completed = Column(Boolean, default=False)

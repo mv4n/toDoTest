@@ -1,34 +1,59 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from typing import List
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Depends
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
+from sqlalchemy import Column, Integer, String, Boolean
+from databases import Database
+
+DATABASE_URL = "sqlite+aiosqlite:///./todos.db"
+
+database = Database(DATABASE_URL)
+engine = create_async_engine(DATABASE_URL, echo=True)
+SessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+Base = declarative_base()
 
 app = FastAPI()
 
-# Додаємо CORS Middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # дозволяємо доступ з усіх джерел
-    allow_credentials=True,
-    allow_methods=["*"],  # дозволяємо всі методи (GET, POST, PUT, DELETE)
-    allow_headers=["*"],  # дозволяємо всі заголовки
-)
+# Модель Todo
+class Todo(Base):
+    __tablename__ = "todos"
+    id = Column(Integer, primary_key=True, index=True)
+    text = Column(String, index=True)
+    completed = Column(Boolean, default=False)
 
-# Список задач в пам'яті
-todos = []
+# Створення таблиць
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
 
-# Модель для задачі
-class Todo(BaseModel):
-    id: int
-    text: str
-    completed: bool
+@app.on_event("startup")
+async def startup():
+    await database.connect()
+    await init_db()
 
-@app.get("/todos/", response_model=List[Todo])
-async def get_todos():
-    return todos
+@app.on_event("shutdown")
+async def shutdown():
+    await database.disconnect()
 
-@app.post("/todos/", response_model=Todo)
-async def create_todo(todo: Todo):
-    todos.append(todo)
-    return todo
+# Отримати всі задачі
+from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def read_root():
+    return {"message": "Hello, FastAPI!"}
+
+
+@app.get("/todos/")
+async def read_todos(session: AsyncSession = Depends(SessionLocal)):
+    result = await session.execute("SELECT * FROM todos")
+    return result.mappings().all()
+
+# Додати нову задачу
+@app.post("/todos/")
+async def create_todo(todo: dict, session: AsyncSession = Depends(SessionLocal)):
+    new_todo = Todo(text=todo["text"], completed=False)
+    session.add(new_todo)
+    await session.commit()
+    await session.refresh(new_todo)
+    return new_todo
